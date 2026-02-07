@@ -1,0 +1,23 @@
+# VidReward Dependencies
+
+# Core RL & Robotics
+mujoco>=3.0.0
+gymnasium-robotics
+stable-baselines3[extra]
+torch
+torchvision
+
+# Computer Vision & Extraction
+mediapipe
+# SAM 2.1 - Note: Installation might require specific github links or local build
+# pip install git+https://github.com/facebookresearch/sam2.git
+opencv-python
+decord
+
+# Utilities & Math
+numpy
+scipy
+matplotlib
+wandb
+pyyaml
+pydantic
