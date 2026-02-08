@@ -16,11 +16,9 @@ class PhaseGrammar:
     # Allowed transitions map
     TRANSITIONS = {
         "IDLE": ["APPROACH"],
-        "APPROACH": ["PRE_GRASP", "IDLE"],
-        "PRE_GRASP": ["GRASP", "APPROACH"],
+        "APPROACH": ["GRASP", "IDLE"],
         "GRASP": ["TRANSPORT", "RELEASE"],
-        "TRANSPORT": ["PLACE", "RELEASE"],
-        "PLACE": ["RELEASE"],
+        "TRANSPORT": ["RELEASE"],
         "RELEASE": ["RETREAT", "IDLE"],
         "RETREAT": ["IDLE", "APPROACH"]
     }

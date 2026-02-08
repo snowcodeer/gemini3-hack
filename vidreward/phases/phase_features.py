@@ -4,10 +4,11 @@ from ..extraction.trajectory import HandTrajectory, ObjectTrajectory
 
 def compute_hand_object_distance(hand_traj: HandTrajectory, obj_traj: ObjectTrajectory, smooth: bool = True) -> np.ndarray:
     """
-    Compute Euclidean distance between hand wrist (landmark 0) and object centroid.
+    Compute Euclidean distance between palm center (avg of landmarks 5, 17) and object centroid.
     """
-    wrist_pos = hand_traj.landmarks[:, 0, :2]
-    distances = np.linalg.norm(wrist_pos - obj_traj.centroids, axis=1)
+    # Use average of index MCP (5) and pinky MCP (17) as palm center
+    palm_center = (hand_traj.landmarks[:, 5, :2] + hand_traj.landmarks[:, 17, :2]) / 2.0
+    distances = np.linalg.norm(palm_center - obj_traj.centroids, axis=1)
     
     if smooth:
         distances = exponential_smoothing(distances, alpha=0.3)
