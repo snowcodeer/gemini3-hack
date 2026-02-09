@@ -16,9 +16,25 @@ import numpy as np
 import torch
 import argparse
 import os
+import matplotlib
+matplotlib.use('Agg') # Use non-interactive backend for thread safety
 import matplotlib.pyplot as plt
 from pathlib import Path
 import sys
+import pickle
+import re
+
+def get_reward_code_snapshot(script_path):
+    """Extracts the reward code from the script using tags."""
+    try:
+        with open(script_path, "r") as f:
+            content = f.read()
+        match = re.search(r"# <REWARD_START>(.*?)# <REWARD_END>", content, re.DOTALL)
+        if match:
+            return match.group(1).strip()
+    except Exception as e:
+        print(f"Warning: Could not snapshot reward code: {e}")
+    return "# Could not extract reward code."
 
 # Add project root
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -35,6 +51,34 @@ from vidreward.utils.video_io import VideoReader
 from vidreward.extraction.vision import detect_rubiks_cube_classical
 from vidreward.extraction.trajectory import ObjectTrajectory
 from vidreward.phases.phase_detector import PhaseDetector
+from vidreward.utils.storage import storage
+import importlib.util
+
+# Load reward registry
+try:
+    from scripts.reward_registry import REWARD_REGISTRY
+except ImportError:
+    # Fallback if scripts isn't a package
+    import sys
+    sys.path.append(os.path.join(os.getcwd(), "scripts"))
+    from reward_registry import REWARD_REGISTRY
+
+
+class CloudSyncCallback(BaseCallback):
+    """Syncs run directory to blob storage periodically."""
+    def __init__(self, run_dir: str, upload_freq: int = 10000, verbose: int = 0):
+        super().__init__(verbose)
+        self.run_dir = run_dir
+        self.upload_freq = upload_freq
+        self.run_name = Path(run_dir).name
+        self.group_name = Path(run_dir).parent.name
+
+    def _on_step(self) -> bool:
+        if self.n_calls % self.upload_freq == 0:
+            if storage.enabled:
+                print(f"Syncing run {self.run_name} to cloud...")
+                storage.upload_dir(self.run_dir, f"runs/{self.group_name}/{self.run_name}")
+        return True
 
 
 class PlotCallback(BaseCallback):
@@ -176,7 +220,7 @@ class PlotCallback(BaseCallback):
 
         plt.tight_layout()
         plt.savefig(os.path.join(self.plot_dir, 'training.png'), dpi=100)
-        plt.close()
+        plt.close(fig)
 
 
 def extract_grasp_pose(video_path: str):
@@ -234,6 +278,7 @@ def extract_grasp_pose(video_path: str):
     
     gemini_data = None
     task_type = "pick" # Default
+    reward_config = None
     
     if analysis_path.exists():
         print(f"Loading Gemini analysis from {analysis_path}...")
@@ -255,7 +300,13 @@ def extract_grasp_pose(video_path: str):
                 print("WARNING: Grasp Frame > Release Frame. Assuming 'Catch' task.")
                 print(f"Ignoring original release frame ({release_frame}) and using end of video.")
                 release_frame = len(frames) - 1
+                release_frame = len(frames) - 1
                 task_type = "catch"
+                
+        # Extract reward config if present
+        if "reward_config" in gemini_data:
+            print(f"Found dynamic reward config in analysis: {gemini_data['reward_config']}")
+            reward_config = gemini_data['reward_config']
     else:
         # Phase detection
         print("Detecting phases (Classical)...")
@@ -306,7 +357,7 @@ def extract_grasp_pose(video_path: str):
     else:
         transport_traj = joint_traj[grasp_frame:release_frame+1].copy()
 
-    return grasp_qpos, target_pos, transport_traj, joint_traj, grasp_frame, hand_traj, task_type
+    return grasp_qpos, target_pos, transport_traj, joint_traj, grasp_frame, hand_traj, task_type, reward_config
 
 
 def calibrate_grasp_pose(env, grasp_qpos: np.ndarray) -> np.ndarray:
@@ -367,6 +418,9 @@ class GraspResidualEnv(gym.Wrapper):
         grasp_frame_idx: int = 0,
         max_steps: int = 150,
         residual_scale: float = 0.3,
+        reward_config: dict = None,
+        reward_version: str = "v3",
+        custom_reward_fn = None
     ):
         super().__init__(env)
         self.grasp_qpos = grasp_qpos
@@ -376,6 +430,21 @@ class GraspResidualEnv(gym.Wrapper):
         self.grasp_frame_idx = grasp_frame_idx
         self.max_steps = max_steps
         self.residual_scale = residual_scale
+        self.reward_version = reward_version
+        self.custom_reward_fn = custom_reward_fn
+        
+        # Default Reward Config
+        self.reward_config = {
+            'success_bonus': 500.0,
+            'time_penalty': -0.1,
+            'lift_bonus': 5.0,
+            'transport_scale': 10.0,
+            'drop_penalty': -20.0,
+            'contact_scale': 0.1,
+            'smooth_near_scale': 50.0
+        }
+        if reward_config:
+            self.reward_config.update(reward_config)
 
         self.steps = 0
         self.initial_obj_pos = None
@@ -440,6 +509,7 @@ class GraspResidualEnv(gym.Wrapper):
 
         self.steps = 0
         self.traj_idx = 0
+        self.ever_lifted = False
         return self._get_obs(), info
 
     def step(self, action):
@@ -472,6 +542,11 @@ class GraspResidualEnv(gym.Wrapper):
 
         reward, info = self._compute_reward()
         terminated = info.get('success', False)
+        
+        # Terminate if we drop after lifting (prevent extreme negative accumulation)
+        if info.get('dropped', False):
+            terminated = True
+            
         truncated = self.steps >= self.max_steps
 
         return self._get_obs(), reward, terminated, truncated, info
@@ -497,42 +572,13 @@ class GraspResidualEnv(gym.Wrapper):
         return obs.astype(np.float32)
 
     def _compute_reward(self):
-        data = self.env.unwrapped.data
-        model = self.env.unwrapped.model
+        # <REWARD_START>
+        if self.custom_reward_fn:
+            return self.custom_reward_fn(self, {})
         
-        obj_pos = data.xpos[model.body("Object").id].copy()
-        dist_to_target = np.linalg.norm(obj_pos - self.target_pos)
-        
-        success = dist_to_target < 0.1
-        is_lifted = obj_pos[2] > 0.08
-        n_contacts = data.ncon
-        
-        reward = 0.0
-        
-        # 1. Contact
-        reward += min(n_contacts, 5) * 0.1
-        
-        # 2. Lift
-        if is_lifted:
-            reward += 2.0
-            # Transport bonus only if lifted
-            reward += (1.0 - np.clip(dist_to_target, 0, 1)) * 5.0
-        
-        # 3. Success
-        if success:
-            reward += 50.0
-            
-        # Penalty
-        if obj_pos[2] < 0.02: # Dropped
-            reward -= 5.0
-            
-        info = {
-            'success': success,
-            'dist_to_target': dist_to_target,
-            'n_contacts': n_contacts,
-            'lifted': is_lifted
-        }
-        return reward, info
+        reward_fn = REWARD_REGISTRY.get(self.reward_version, REWARD_REGISTRY["v3"])
+        return reward_fn(self, {})
+        # <REWARD_END>
 
 
 def train(args):
@@ -564,6 +610,24 @@ def train(args):
         transport_traj = config['transport_traj']
         task_type = config.get('task_type', 'pick')
 
+        reward_config = config.get('reward_config', {})
+        reward_version = config.get('reward_version', 'v3')
+        
+        # Allow CLI override for version
+        if args.reward_version:
+            reward_version = args.reward_version
+        cli_reward_config = {
+            'success_bonus': args.success_bonus,
+            'lift_bonus': args.lift_bonus,
+            'transport_scale': args.transport_scale,
+            'contact_scale': args.contact_scale,
+            'drop_penalty': args.drop_penalty,
+            'time_penalty': args.time_penalty,
+            'smooth_near_scale': args.smooth_near_scale
+        }
+        # Update with CLI args if they were explicitly provided or just use them as defaults
+        reward_config.update(cli_reward_config)
+
         # Copy history.pkl if it exists to preserve plotting
         src_history = os.path.join(source_dir, "plots", "history.pkl")
         dst_plots = os.path.join(run_dir, "plots")
@@ -573,12 +637,22 @@ def train(args):
             shutil.copy(src_history, dst_history)
             print("Successfully copied training history.")
 
+        # Snapshot reward code for experiment tracking
+        reward_snippet = get_reward_code_snapshot(__file__)
+        with open(os.path.join(run_dir, "reward_code.py"), "w") as f:
+            f.write(reward_snippet)
+
         # Save config to new directory
         with open(os.path.join(run_dir, "config.pkl"), "wb") as f:
             pickle.dump(config, f)
+            
+        # Snapshot reward code for experiment tracking
+        reward_snippet = get_reward_code_snapshot(__file__)
+        with open(os.path.join(run_dir, "reward_code.py"), "w") as f:
+            f.write(reward_snippet)
         
-        # We still need hand_traj and grasp_frame for the wrapper
-        _, _, _, _, grasp_frame, hand_traj, _ = extract_grasp_pose(args.video)
+        # We still need hand_traj and grasp_frame for the wrapper, ignore reward config
+        _, _, _, _, grasp_frame, hand_traj, _, _ = extract_grasp_pose(args.video)
 
         # Find model to load
         model_path = os.path.join(source_dir, "td3_final.zip")
@@ -601,8 +675,13 @@ def train(args):
         print(f"Training Residual RL for {video_name}")
         print(f"Directory: {run_dir}")
 
-        # Extract & Calibrate
-        grasp_qpos, target_pos, transport_traj, joint_traj, grasp_frame, hand_traj, task_type = extract_grasp_pose(args.video)
+        
+        # Configure from Video
+        grasp_qpos, target_pos, transport_traj, hand_traj, grasp_frame, _, task_type, dynamic_reward_config = extract_grasp_pose(args.video)
+        
+        # Merge dynamic reward config if found
+        if dynamic_reward_config:
+            reward_config.update(dynamic_reward_config)
         
         # Init Env just to calibrate transport traj base
         base_env = gym.make("AdroitHandRelocate-v1")
@@ -614,22 +693,60 @@ def train(args):
         base_env.close()
 
         # Save Config
+        reward_config = {
+            'success_bonus': args.success_bonus,
+            'lift_bonus': args.lift_bonus,
+            'transport_scale': args.transport_scale,
+            'contact_scale': args.contact_scale,
+            'drop_penalty': args.drop_penalty,
+            'time_penalty': args.time_penalty,
+            'smooth_near_scale': args.smooth_near_scale
+        }
+
         config = {
             'grasp_qpos': grasp_qpos,
             'target_pos': target_pos,
             'transport_traj': transport_traj,
             'residual_scale': args.residual_scale,
-            'task_type': task_type
+            'task_type': task_type,
+            'reward_config': reward_config,
+            'reward_version': args.reward_version
         }
         with open(os.path.join(run_dir, "config.pkl"), "wb") as f:
             pickle.dump(config, f)
+            
+        # Snapshot reward code for experiment tracking
+        reward_snippet = get_reward_code_snapshot(__file__)
+        with open(os.path.join(run_dir, "reward_code.py"), "w") as f:
+            f.write(reward_snippet)
+
+    # Load custom reward function if file provided
+    custom_reward_fn = None
+    if args.reward_file:
+        try:
+            spec = importlib.util.spec_from_file_location("custom_reward", args.reward_file)
+            if spec and spec.loader:
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                custom_reward_fn = getattr(module, "compute_reward", None)
+                if custom_reward_fn:
+                    print(f"Successfully loaded custom reward from {args.reward_file}")
+                else:
+                    print(f"Error: {args.reward_file} does not define 'compute_reward(env, info)'")
+            else:
+                print(f"Error: Could not load spec for {args.reward_file}")
+        except Exception as e:
+            print(f"Error loading reward file: {e}")
 
     # Train Env
     def make_env():
         e = gym.make("AdroitHandRelocate-v1")
         e = GraspResidualEnv(
             e, grasp_qpos, target_pos, transport_traj, hand_traj, grasp_frame,
-            max_steps=args.max_steps, residual_scale=args.residual_scale
+            max_steps=args.max_steps, residual_scale=args.residual_scale,
+            reward_config=reward_config,
+            reward_version=args.reward_version,
+            custom_reward_fn=custom_reward_fn
         )
         e = Monitor(e, run_dir)
         return e
@@ -679,14 +796,19 @@ def train(args):
         plot_freq=2000
     )
 
+    sync_cb = CloudSyncCallback(run_dir, upload_freq=10000)
+
     print(f"Training for {args.timesteps} steps...")
     model.learn(
         total_timesteps=args.timesteps,
-        callback=[checkpoint_cb, plot_cb],
+        callback=[checkpoint_cb, plot_cb, sync_cb],
         progress_bar=True,
     )
 
     model.save(os.path.join(run_dir, "td3_final"))
+    if storage.enabled:
+        print("Final sync to cloud...")
+        storage.upload_dir(run_dir, f"runs/{run_dir.split('/')[-1] if '/' in run_dir else Path(run_dir).parent.name}/{Path(run_dir).name}")
     print("Training Complete!")
     env.close()
 
@@ -700,6 +822,17 @@ if __name__ == "__main__":
     parser.add_argument("--max-steps", type=int, default=100)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--resume", type=str, help="Path to run directory to resume from")
+
+    # Reward configuration
+    parser.add_argument("--success-bonus", type=float, default=500.0)
+    parser.add_argument("--lift-bonus", type=float, default=5.0)
+    parser.add_argument("--transport-scale", type=float, default=10.0)
+    parser.add_argument("--contact-scale", type=float, default=0.1)
+    parser.add_argument("--drop-penalty", type=float, default=-20.0)
+    parser.add_argument("--time-penalty", type=float, default=-0.1)
+    parser.add_argument("--smooth-near-scale", type=float, default=50.0)
+    parser.add_argument("--reward-version", type=str, default="v3", choices=["v1", "v2", "v3", "stable"])
+    parser.add_argument("--reward-file", type=str, help="Path to .py file defining compute_reward(env, info)")
 
     args = parser.parse_args()
     train(args)
