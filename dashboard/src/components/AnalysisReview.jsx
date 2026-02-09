@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Check, X, Play, Pause, Clock, Terminal, Save, Rocket, AlertTriangle, ChevronLeft, ChevronRight, Anchor, Loader2, RefreshCw } from 'lucide-react';
+import { Check, X, Play, Pause, Clock, Terminal, Save, Rocket, AlertTriangle, ChevronLeft, ChevronRight, Anchor, Loader2, RefreshCw, Edit2 } from 'lucide-react';
 
 export default function AnalysisReview({ videoPath, onConfirm, onCancel }) {
     const [analysis, setAnalysis] = useState(null);
@@ -10,9 +10,9 @@ export default function AnalysisReview({ videoPath, onConfirm, onCancel }) {
     const [duration, setDuration] = useState(0);
     const [isPlaying, setIsPlaying] = useState(false);
     const [pollingCount, setPollingCount] = useState(0);
-    const [chatMessages, setChatMessages] = useState([]);
-    const [userMessage, setUserMessage] = useState("");
-    const [chatLoading, setChatLoading] = useState(false);
+    const [editingIndex, setEditingIndex] = useState(null);
+    const [isRegenerating, setIsRegenerating] = useState(false);
+    const [videoKey, setVideoKey] = useState(0);
 
     const videoRef = useRef(null);
 
@@ -37,7 +37,7 @@ export default function AnalysisReview({ videoPath, onConfirm, onCancel }) {
     console.log("AnalysisReview: videoPath =", videoPath);
     console.log("AnalysisReview: taskName =", taskName);
 
-    const labeledVideoUrl = `http://localhost:8000/data/${taskName}/labeled.mp4`;
+    const labeledVideoUrl = `http://localhost:8000/data/${taskName}/labeled.mp4?t=${videoKey}`;
     const analysisUrl = `http://localhost:8000/data/${taskName}/analysis.json`;
 
     console.log("AnalysisReview: analysisUrl =", analysisUrl);
@@ -118,33 +118,28 @@ export default function AnalysisReview({ videoPath, onConfirm, onCancel }) {
         return "#a855f7"; // Default purple
     };
 
-    const handleSendMessage = async () => {
-        if (!userMessage.trim()) return;
 
-        setChatLoading(true);
-        const newMessage = { role: 'user', content: userMessage };
-        setChatMessages(prev => [...prev, newMessage]);
-
+    const handleRelabel = async () => {
+        setIsRegenerating(true);
         try {
-            const res = await fetch(`http://localhost:8000/api/training/chat/${taskName}`, {
+            const res = await fetch(`http://localhost:8000/api/analysis/update/${taskName}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    message: userMessage,
-                    current_analysis: editedAnalysis
-                })
+                body: JSON.stringify({ analysis: editedAnalysis })
             });
 
             if (res.ok) {
-                const data = await res.json();
-                setEditedAnalysis(data.analysis);
-                setChatMessages(prev => [...prev, { role: 'assistant', content: data.thinking }]);
-                setUserMessage("");
+                // Force reload of video
+                setVideoKey(prev => prev + 1);
+            } else {
+                console.error("Relabel failed");
+                alert("Failed to regenerate video. Check backend logs.");
             }
         } catch (err) {
-            console.error("Chat error:", err);
+            console.error("Relabel error:", err);
+            alert("Error connecting to server.");
         } finally {
-            setChatLoading(false);
+            setIsRegenerating(false);
         }
     };
 
@@ -165,6 +160,17 @@ export default function AnalysisReview({ videoPath, onConfirm, onCancel }) {
             newMilestones.push({ label, frame });
         }
         setEditedAnalysis({ ...editedAnalysis, milestones: newMilestones });
+    };
+
+    const handleEditLabel = (index, newLabel) => {
+        if (!newLabel.trim()) {
+            setEditingIndex(null);
+            return;
+        }
+        const newMilestones = [...editedAnalysis.milestones];
+        newMilestones[index].label = newLabel;
+        setEditedAnalysis({ ...editedAnalysis, milestones: newMilestones });
+        setEditingIndex(null);
     };
 
     if (loading) {
@@ -224,8 +230,14 @@ export default function AnalysisReview({ videoPath, onConfirm, onCancel }) {
                 </div>
                 <div className="header-actions">
                     <button onClick={onCancel} className="btn-secondary">Cancel</button>
-                    <button onClick={() => onConfirm(editedAnalysis, false)} className="btn-secondary" style={{ background: '#3b82f6' }}>
-                        Relabel
+                    <button
+                        onClick={handleRelabel}
+                        className="btn-secondary"
+                        style={{ background: '#3b82f6', gap: '8px' }}
+                        disabled={isRegenerating}
+                    >
+                        {isRegenerating ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}
+                        {isRegenerating ? "Regenerating..." : "Save & Regenerate"}
                     </button>
                     <button onClick={() => onConfirm(editedAnalysis, true)} className="btn-primary" style={{ background: '#a855f7' }}>
                         Start Training
@@ -253,9 +265,6 @@ export default function AnalysisReview({ videoPath, onConfirm, onCancel }) {
                             onLoadStart={() => console.log("Video load started:", labeledVideoUrl)}
                             onCanPlay={() => console.log("Video can play")}
                         />
-                        <div className="video-overlay-info">
-                            <div className="overlay-frame">FRAME: {currentFrame}</div>
-                        </div>
                     </div>
 
                     <div className="video-controls">
@@ -336,12 +345,32 @@ export default function AnalysisReview({ videoPath, onConfirm, onCancel }) {
                             <div
                                 key={idx}
                                 className="milestone-box"
-                                onClick={() => seekToFrame(ms.frame)}
+                                onClick={() => editingIndex !== idx && seekToFrame(ms.frame)}
                                 style={{ borderLeft: `4px solid ${getLabelColor(ms.label)}` }}
                             >
-                                <div className="m-label">{ms.label}</div>
-                                <div className="m-value">{ms.frame}</div>
-                                <div className="m-hint">Click to seek</div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                    <div style={{ flex: 1 }}>
+                                        {editingIndex === idx ? (
+                                            <input
+                                                autoFocus
+                                                defaultValue={ms.label}
+                                                onBlur={(e) => handleEditLabel(idx, e.target.value)}
+                                                onKeyDown={(e) => e.key === 'Enter' && handleEditLabel(idx, e.target.value)}
+                                                className="edit-milestone-input"
+                                            />
+                                        ) : (
+                                            <div className="m-label">{ms.label}</div>
+                                        )}
+                                        <div className="m-value">{ms.frame}</div>
+                                    </div>
+                                    <button
+                                        className="edit-btn"
+                                        onClick={(e) => { e.stopPropagation(); setEditingIndex(idx); }}
+                                    >
+                                        <Edit2 size={14} />
+                                    </button>
+                                </div>
+                                <div className="m-hint">Click to seek • Click label to rename</div>
                             </div>
                         ))}
                     </div>
@@ -362,32 +391,6 @@ export default function AnalysisReview({ videoPath, onConfirm, onCancel }) {
                         </div>
                     </div>
 
-                    <div className="card-label" style={{ marginTop: '24px' }}>Refine with Gemini</div>
-                    <div className="chat-interface">
-                        <div className="chat-messages">
-                            {chatMessages.length === 0 && (
-                                <p className="chat-empty">Ask Gemini to adjust frames or labels...</p>
-                            )}
-                            {chatMessages.map((m, i) => (
-                                <div key={i} className={`chat-bubble ${m.role}`}>
-                                    {m.content}
-                                </div>
-                            ))}
-                            {chatLoading && <div className="chat-bubble assistant loading"><Loader2 className="animate-spin" size={16} /> Gemini is thinking...</div>}
-                        </div>
-                        <div className="chat-input-wrapper">
-                            <input
-                                type="text"
-                                value={userMessage}
-                                onChange={(e) => setUserMessage(e.target.value)}
-                                placeholder="e.g., Shift frames by +5"
-                                onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-                            />
-                            <button onClick={handleSendMessage} disabled={chatLoading}>
-                                Send
-                            </button>
-                        </div>
-                    </div>
                 </div>
             </div>
 
@@ -401,9 +404,9 @@ export default function AnalysisReview({ videoPath, onConfirm, onCancel }) {
                 }
                 .review-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 24px; border-bottom: 1px solid var(--border-color); background: var(--bg-card); z-index: 10; }
                 .header-actions { display: flex; gap: 12px; align-items: center; }
-                .review-grid { display: grid; grid-template-columns: 1fr 360px; flex: 1; min-height: 0; }
+                .review-grid { display: grid; grid-template-columns: 1fr 420px; flex: 1; min-height: 0; }
                 .card-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-secondary); margin-bottom: 12px; }
-                .video-section { display: flex; flex-direction: column; min-height: 0; padding: 24px; }
+                .video-section { display: flex; flex-direction: column; min-height: 0; padding: 24px; min-width: 0; }
                 .controls-section { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; padding: 24px; border-left: 1px solid var(--border-color); background: rgba(0,0,0,0.1); }
                 .video-container { position: relative; border-radius: 16px; border: 1px solid var(--border-color); overflow: hidden; background: black; box-shadow: 0 10px 30px rgba(0,0,0,0.5); flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
                 .labeled-video { max-width: 100%; max-height: 100%; object-fit: contain; }
@@ -443,109 +446,49 @@ export default function AnalysisReview({ videoPath, onConfirm, onCancel }) {
                     margin-bottom: 2px;
                 }
                 .timeline-slider { width: 100%; position: relative; z-index: 1; margin-bottom: 0; }
-                .control-buttons { display: flex; align-items: center; gap: 12px; margin-top: 20px; }
+                .control-buttons { display: flex; align-items: center; gap: 12px; margin-top: 20px; flex-wrap: wrap; }
                 .icon-btn { background: var(--bg-secondary); border: 1px solid var(--border-color); color: white; padding: 8px; border-radius: 8px; cursor: pointer; }
-                .play-btn { background: #a855f7; border: none; padding: 12px; border-radius: 50%; }
-                .time-display { font-family: monospace; font-size: 1rem; color: var(--text-secondary); margin-left: 12px; }
-                .btn-set-key { background: var(--bg-secondary); color: white; border: 1px solid var(--border-color); padding: 8px 12px; border-radius: 6px; font-weight: 600; font-size: 0.75rem; cursor: pointer; }
-                .milestone-grid { display: flex; flex-direction: column; gap: 12px; }
-                .milestone-box { background: var(--bg-card); border: 1px solid var(--border-color); padding: 12px 16px; border-radius: 12px; cursor: pointer; transition: all 0.2s; position: relative; }
-                .milestone-box:hover { border-color: #a855f7; background: rgba(168, 85, 247, 0.05); transform: translateX(4px); }
-                .m-label { color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; font-weight: 700; margin-bottom: 4px; }
-                .m-value { font-size: 1.5rem; font-weight: 800; }
-                .m-hint { font-size: 0.7rem; color: #a855f7; margin-top: 4px; opacity: 0; transition: opacity 0.2s; }
-                .milestone-box:hover .m-hint { opacity: 1; }
-                
-                .analysis-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 16px; padding: 24px; }
-                .field label { display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 8px; }
-                .field input { width: 100%; padding: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; color: white; }
-                .explanation { margin-top: 16px; display: flex; gap: 10px; padding: 12px; background: rgba(251, 191, 36, 0.1); border-radius: 8px; color: #fbbf24; font-size: 0.8rem; }
-
-                /* Chat Interface Styles */
-                .chat-interface {
-                    background: var(--bg-card);
-                    border: 1px solid var(--border-color);
-                    border-radius: 12px;
-                    display: flex;
-                    flex-direction: column;
-                    height: 350px;
-                    overflow: hidden;
-                    margin-top: 8px;
-                }
-                .chat-messages {
-                    flex: 1;
-                    padding: 12px;
-                    overflow-y: auto;
-                    display: flex;
-                    flex-direction: column;
-                    gap: 8px;
-                }
-                .chat-empty {
-                    color: var(--text-secondary);
-                    font-size: 0.8rem;
-                    text-align: center;
-                    margin-top: 20px;
-                }
-                .chat-bubble {
-                    padding: 8px 12px;
-                    border-radius: 12px;
-                    font-size: 0.85rem;
-                    max-width: 85%;
-                    line-height: 1.4;
-                }
-                .chat-bubble.user {
-                    background: #a855f7;
-                    color: white;
-                    align-self: flex-end;
-                    border-bottom-right-radius: 2px;
-                }
-                .chat-bubble.assistant {
-                    background: var(--bg-secondary);
-                    color: white;
-                    align-self: flex-start;
-                    border-bottom-left-radius: 2px;
-                    border: 1px solid var(--border-color);
-                }
-                .chat-bubble.loading {
+                .square-btn { 
+                    position: relative;
+                    background: var(--bg-secondary); 
+                    border: 1px solid var(--border-color); 
+                    color: white; 
+                    width: 36px; 
+                    height: 36px; 
+                    border-radius: 8px; 
+                    cursor: pointer; 
                     display: flex;
                     align-items: center;
-                    gap: 8px;
-                    color: var(--text-secondary);
-                    font-style: italic;
-                }
-                .chat-input-wrapper {
-                    padding: 12px;
-                    border-top: 1px solid var(--border-color);
-                    display: flex;
-                    gap: 8px;
-                }
-                .chat-input-wrapper input {
-                    flex: 1;
-                    background: var(--bg-secondary);
-                    border: 1px solid var(--border-color);
-                    border-radius: 6px;
-                    padding: 8px 12px;
-                    color: white;
-                    font-size: 0.85rem;
-                }
-                .chat-input-wrapper button {
-                    background: #a855f7;
-                    color: white;
-                    border: none;
-                    border-radius: 6px;
-                    padding: 6px 16px;
-                    cursor: pointer;
-                    font-weight: 600;
+                    justify-content: center;
+                    border-bottom: 3px solid var(--btn-color);
                     transition: all 0.2s;
                 }
-                .chat-input-wrapper button:hover:not(:disabled) {
-                    background: #9333ea;
-                    transform: translateY(-1px);
-                }
-                .chat-input-wrapper button:disabled {
+                .square-btn:hover { background: var(--border-color); transform: translateY(-2px); }
+                .btn-label-tiny { 
+                    position: absolute; 
+                    bottom: -2px; 
+                    right: 2px; 
+                    font-size: 0.6rem; 
+                    font-weight: 800; 
                     opacity: 0.5;
-                    cursor: not-allowed;
                 }
+                .play-btn { background: #a855f7; border: none; padding: 12px; border-radius: 50%; }
+                .time-display { font-family: monospace; font-size: 1rem; color: var(--text-secondary); margin-left: 12px; }
+                .milestone-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+                .milestone-box { background: var(--bg-card); border: 1px solid var(--border-color); padding: 8px 12px; border-radius: 4px; cursor: pointer; transition: all 0.2s; position: relative; min-height: 60px; display: flex; flex-direction: column; justify-content: center; background: #1e1e1e; }
+                .milestone-box:hover { border-color: #a855f7; background: #2d2d2d; transform: translateY(-2px); }
+                .m-label { color: var(--text-secondary); font-size: 0.65rem; text-transform: uppercase; font-weight: 700; margin-bottom: 2px; }
+                .m-value { font-size: 1.1rem; font-weight: 800; }
+                .m-hint { font-size: 0.6rem; color: #a855f7; margin-top: 2px; opacity: 0; transition: opacity 0.2s; }
+                .milestone-box:hover .m-hint { opacity: 1; }
+                .edit-btn { position: absolute; top: 4px; right: 4px; background: transparent; border: none; color: var(--text-secondary); cursor: pointer; padding: 2px; border-radius: 4px; opacity: 0.3; transition: all 0.2s; }
+                .edit-btn:hover { opacity: 1; background: var(--bg-secondary); color: white; }
+                .edit-milestone-input { background: var(--bg-secondary); border: 1px solid #a855f7; border-radius: 4px; color: white; font-size: 0.65rem; padding: 2px 4px; width: 100%; }
+                
+                .analysis-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 16px; }
+                .field label { display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 8px; }
+                .field input { width: 100%; padding: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; color: white; }
+                .explanation { margin-top: 12px; display: flex; gap: 8px; padding: 8px; background: rgba(251, 191, 36, 0.1); border-radius: 8px; color: #fbbf24; font-size: 0.75rem; }
             `}</style>
         </div>
     );

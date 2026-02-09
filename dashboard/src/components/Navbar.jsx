@@ -26,7 +26,6 @@ export default function Navbar({ currentView, setView, onNewRun }) {
         <NavItem view="home" icon={Home} label="Home" />
         <NavItem view="videos" icon={Video} label="Videos" />
         <NavItem view="hub" icon={Database} label="Experiments" />
-        <NavItem view="queue" icon={Activity} label="Activity" />
       </div>
 
       <div className="navbar-actions">

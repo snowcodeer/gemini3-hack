@@ -10,7 +10,7 @@ import VideosView from './components/VideosView';
 import './index.css';
 
 function App() {
-  const [viewMode, setViewMode] = useState('home'); // 'home', 'hub', 'queue', 'analysis', 'videos'
+  const [viewMode, setViewMode] = useState('home'); // 'home', 'queue', 'analysis', 'videos'
   const [sessionId, setSessionId] = useState(null);
   const [initialVideo, setInitialVideo] = useState(null);
 
@@ -66,8 +66,15 @@ function App() {
               setViewMode('queue');
             }}
           />
-        ) : (
+        ) : viewMode === 'hub' ? (
           <ExperimentHub sessionId={sessionId} />
+        ) : (
+          <QueueView
+            onBack={() => setViewMode('home')}
+            sessionId={sessionId}
+            initialVideo={initialVideo}
+            onClearInitial={() => setInitialVideo(null)}
+          />
         )}
       </main>
     </div>

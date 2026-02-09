@@ -40,16 +40,6 @@ export default function VideosView({ onReviewAnalysis, onLaunchTraining }) {
         alert('Copied to clipboard!');
     };
 
-    const handleDelete = async (taskName) => {
-        if (!confirm(`Delete "${taskName}" and all associated files?`)) return;
-
-        try {
-            await fetch(`http://localhost:8000/api/videos/${taskName}`, { method: 'DELETE' });
-            fetchVideos(); // Refresh list
-        } catch (error) {
-            console.error('Failed to delete:', error);
-        }
-    };
 
     const getStatusBadge = (status) => {
         const badges = {
@@ -103,7 +93,8 @@ export default function VideosView({ onReviewAnalysis, onLaunchTraining }) {
                                 src={`${video.video_url || `http://localhost:8000/data/${video.task_name}/video.mp4`}#t=0.1`}
                                 className="thumbnail-video"
                                 muted
-                                preload="metadata"
+                                playsInline
+                                preload="auto"
                             />
                             <div className="video-overlay">
                                 <Video size={48} strokeWidth={1.5} />
@@ -177,12 +168,6 @@ export default function VideosView({ onReviewAnalysis, onLaunchTraining }) {
                                         Retry Analysis
                                     </button>
                                 )}
-                                <button
-                                    className="btn-action btn-danger"
-                                    onClick={() => handleDelete(video.task_name)}
-                                >
-                                    <Trash2 size={16} />
-                                </button>
                             </div>
                         </div>
                     </div>

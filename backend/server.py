@@ -1,3 +1,8 @@
+import sys
+from pathlib import Path
+# Add project root to path for imports
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+
 import os
 import pickle
 import json
@@ -9,10 +14,8 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from pathlib import Path
 from vidreward.utils.storage import storage
 import subprocess
-import sys
 import shutil
 import google.generativeai as genai
 from dotenv import load_dotenv
@@ -456,8 +459,8 @@ def get_videos_library():
             except:
                 pass
         
-        # Generate S3 URL if storage is enabled, otherwise use local path
-        video_url = str(video_file)
+        # Generate S3 URL if storage is enabled, otherwise use None (frontend handles local URL)
+        video_url = None
         if storage.enabled:
             # S3 URL format
             video_url = storage.get_url(f"data/{task_dir.name}/video.mp4")
@@ -562,48 +565,48 @@ def complete_training(task_name: str, results: dict):
     
     return {"status": "completed", "task_name": task_name}
 
-@app.post("/api/training/chat/{task_name}")
-async def chat_with_gemini(task_name: str, request: ChatRequest):
-    """Refine labels via chat with Gemini"""
-    if not API_KEY:
-        raise HTTPException(status_code=500, detail="Gemini API Key not configured")
+class AnalysisUpdate(BaseModel):
+    analysis: dict
+
+@app.post("/api/analysis/update/{task_name}")
+def update_analysis(task_name: str, update: AnalysisUpdate):
+    """Update analysis and regenerate labeled video"""
+    task_dir = Path("data") / task_name
+    if not task_dir.exists():
+        raise HTTPException(status_code=404, detail="Task not found")
+        
+    analysis_path = task_dir / "analysis.json"
     
-    # Use flash for quick turnaround
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    # 1. Save new analysis
+    with open(analysis_path, "w") as f:
+        json.dump(update.analysis, f, indent=4)
     
-    prompt = f"""
-    You are an expert robotics assistant helping to refine event labels (milestones) for a video-based training task.
+    # 2. Regenerate labeled video
+    video_path = task_dir / "video.mp4"
+    labeled_path = task_dir / "labeled.mp4"
     
-    Task Name: {task_name}
-    Current Analysis: {json.dumps(request.current_analysis, indent=2)}
-    
-    User Input: {request.message}
-    
-    Instructions:
-    1. Based on the user input, adjust the milestone frames or labels in the analysis.
-    2. If the user asks for a relative change (e.g. "shift everything by 5 frames"), calculate the new frame numbers.
-    3. If the user asks for a new milestone, add it with a reasonable frame estimate if possible.
-    4. Return ONLY a JSON object with two fields:
-       - "analysis": the updated analysis JSON (matching the input task_type, milestones, etc. structure)
-       - "thinking": a brief one-sentence explanation of what you changed.
-    
-    Example response structure:
-    {{
-        "analysis": {{ 
-            "object_name": "...",
-            "task_type": "...",
-            "milestones": [...] 
-        }},
-        "thinking": "Updated the grasp_frame to 15 as requested."
-    }}
-    """
+    print(f"Regenerating video for {task_name}...")
+    cmd = [
+        sys.executable, "scripts/label_video.py",
+        "--video", str(video_path),
+        "--analysis", str(analysis_path),
+        "--output", str(labeled_path)
+    ]
     
     try:
-        response = model.generate_content(prompt, generation_config={"response_mime_type": "application/json"})
-        return json.loads(response.text)
-    except Exception as e:
-        print(f"Chat error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to regenerate video: {e}")
+    
+    # 3. Sync to S3 if enabled
+    if storage.enabled:
+        try:
+            storage.upload_file(str(analysis_path), f"data/{task_name}/analysis.json")
+            storage.upload_file(str(labeled_path), f"data/{task_name}/labeled.mp4")
+        except Exception as e:
+            print(f"S3 sync warning: {e}")
+
+    return {"status": "updated", "task_name": task_name}
 
 
 
