@@ -56,8 +56,12 @@ def get_finger_contacts(model, data, obj_geom_id):
     return contacts
 
 
-def replay_m1(video_path: str, output_path: str = "adroit_replay.mp4"):
+def replay_m1(video_path: str, output_path: str = "adroit_replay.mp4", 
+              obj_scale: float = 0.8, 
+              hand_scales: tuple = (0.5, 0.3, 0.3), 
+              grasp_offset: tuple = (0.0, -0.08, 0.08)):
     print(f"Processing video: {video_path}")
+    print(f"Config: ObjScale={obj_scale}, HandScales={hand_scales}, GraspOffset={grasp_offset}")
 
     # Mirror video for left hand -> right hand conversion
     # Set to False for right-handed videos
@@ -124,7 +128,7 @@ def replay_m1(video_path: str, output_path: str = "adroit_replay.mp4"):
         ny = (cy / h_vid) - 0.5
 
         # Map to Sim coordinates
-        SCALE = 0.8
+        SCALE = obj_scale
         obj_pos_sim[i] = [nx * SCALE, -ny * SCALE + 0.1, 0.035]  # Z fixed on table
 
     # Detect GRASP phase to calibrate object position
@@ -250,7 +254,7 @@ def replay_m1(video_path: str, output_path: str = "adroit_replay.mp4"):
 
     # CALIBRATE: Find qpos that positions palm to grasp the object
     # Position palm ABOVE and BEHIND cube so fingers curl down onto it
-    GRASP_OFFSET = np.array([0.0, -0.08, 0.08])  # 8cm behind, 8cm up (fingers reach down)
+    GRASP_OFFSET = np.array(grasp_offset)  # 8cm behind, 8cm up (fingers reach down)
     target_pos = obj_init_pos + GRASP_OFFSET
     print(f"Grasp target (with offset): {target_pos}")
     qpos_guess = np.array([0.0, 0.0, 0.0])
@@ -362,9 +366,7 @@ def replay_m1(video_path: str, output_path: str = "adroit_replay.mp4"):
             hand_delta_z = hand_pos[2] - init_hand_vid[2]
 
             # Scale video movement to sim space
-            SCALE_X = 0.5  # Video X -> Sim X
-            SCALE_Y = 0.3  # Video Y -> Sim Z (height)
-            SCALE_Z = 0.3  # Video depth -> Sim Y (forward/back)
+            SCALE_X, SCALE_Y, SCALE_Z = hand_scales
 
             # Apply delta to grasp_qpos (using same axis mapping as calibration)
             sim_qpos = grasp_qpos.copy()
@@ -574,6 +576,8 @@ def replay_m1(video_path: str, output_path: str = "adroit_replay.mp4"):
             # Overlay Info on Sim
             cv2.putText(sim_frame, f"Frame: {i}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,255), 2)
             cv2.putText(sim_frame, current_phase, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, phase_color, 2)
+            cv2.putText(sim_frame, f"S_Obj: {SCALE:.2f}", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 0), 1)
+            cv2.putText(sim_frame, f"S_Hand: {SCALE_X:.1f},{SCALE_Y:.1f},{SCALE_Z:.1f}", (10, 110), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 0), 1)
 
             # Concatenate
             combined = np.hstack((vid_frame, sim_frame))
@@ -586,6 +590,19 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--video", default="data/pick-rubiks-cube.mp4")
     parser.add_argument("--out", default="adroit_replay_sbs.mp4") # Side-by-side
+    
+    # Tuning params
+    parser.add_argument("--obj-scale", type=float, default=0.8, help="Scale for object position mapping")
+    parser.add_argument("--hand-scales", type=str, default="0.5,0.3,0.3", help="Scales for hand motion X,Y,Z (comma separated)")
+    parser.add_argument("--grasp-offset", type=str, default="0.0,-0.08,0.08", help="Grasp target offset X,Y,Z (comma separated)")
+    
     args = parser.parse_args()
     
-    replay_m1(args.video, args.out)
+    # Parse comma separated strings
+    hand_scales = tuple(map(float, args.hand_scales.split(',')))
+    grasp_offset = tuple(map(float, args.grasp_offset.split(',')))
+    
+    replay_m1(args.video, args.out, 
+             obj_scale=args.obj_scale, 
+             hand_scales=hand_scales, 
+             grasp_offset=grasp_offset)
