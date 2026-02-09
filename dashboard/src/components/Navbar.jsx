@@ -29,10 +29,6 @@ export default function Navbar({ currentView, setView, onNewRun }) {
       </div>
 
       <div className="navbar-actions">
-        <button className="btn-primary" onClick={onNewRun}>
-          <Plus size={16} />
-          <span>New Run</span>
-        </button>
       </div>
 
       <style>{`
@@ -40,9 +36,9 @@ export default function Navbar({ currentView, setView, onNewRun }) {
           height: 64px;
           background: var(--bg-card);
           border-bottom: 1px solid var(--border-color);
-          display: flex;
+          display: grid;
+          grid-template-columns: 1fr auto 1fr;
           align-items: center;
-          justify-content: space-between;
           padding: 0 24px;
           position: sticky;
           top: 0;
@@ -111,6 +107,7 @@ export default function Navbar({ currentView, setView, onNewRun }) {
         .navbar-actions {
           display: flex;
           gap: 12px;
+          justify-content: flex-end;
         }
       `}</style>
     </nav>
