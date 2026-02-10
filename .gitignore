@@ -156,3 +156,8 @@ results/
 validation_results/
 wandb/
 tensorboard_logs/
+
+# Debug & Replay outputs
+outputs/
+debug_*.png
+nul
