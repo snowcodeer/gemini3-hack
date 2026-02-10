@@ -1,4 +1,8 @@
-const API_BASE = 'http://localhost:8000/api';
+// Use environment variable for production, fallback to localhost for dev
+const API_HOST = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_BASE = `${API_HOST}/api`;
+
+export { API_HOST, API_BASE };
 
 export const fetchRuns = async () => {
   const response = await fetch(`${API_BASE}/runs`);
@@ -18,4 +22,4 @@ export const fetchRunFiles = async (group, runId) => {
   return response.json();
 };
 
-export const getFileUrl = (path) => `http://localhost:8000/${path}`;
+export const getFileUrl = (path) => `${API_HOST}/${path}`;

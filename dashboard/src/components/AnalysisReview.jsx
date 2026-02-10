@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Check, X, Play, Pause, Clock, Terminal, Save, Rocket, AlertTriangle, ChevronLeft, ChevronRight, Anchor, Loader2, RefreshCw, Edit2, Plus, Trash2 } from 'lucide-react';
+import { API_HOST, API_BASE } from '../utils/api';
 
 export default function AnalysisReview({ videoPath, onConfirm, onCancel }) {
     const [analysis, setAnalysis] = useState(null);
@@ -37,8 +38,8 @@ export default function AnalysisReview({ videoPath, onConfirm, onCancel }) {
     console.log("AnalysisReview: videoPath =", videoPath);
     console.log("AnalysisReview: taskName =", taskName);
 
-    const labeledVideoUrl = `http://localhost:8000/data/${taskName}/labeled.mp4?t=${videoKey}`;
-    const analysisUrl = `http://localhost:8000/data/${taskName}/analysis.json`;
+    const labeledVideoUrl = `${API_HOST}/data/${taskName}/labeled.mp4?t=${videoKey}`;
+    const analysisUrl = `${API_HOST}/data/${taskName}/analysis.json`;
 
     console.log("AnalysisReview: analysisUrl =", analysisUrl);
     console.log("AnalysisReview: labeledVideoUrl =", labeledVideoUrl);
@@ -122,7 +123,7 @@ export default function AnalysisReview({ videoPath, onConfirm, onCancel }) {
     const handleRelabel = async () => {
         setIsRegenerating(true);
         try {
-            const res = await fetch(`http://localhost:8000/api/analysis/update/${taskName}`, {
+            const res = await fetch(`${API_BASE}/analysis/update/${taskName}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ analysis: editedAnalysis })

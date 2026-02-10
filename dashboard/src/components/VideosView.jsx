@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Video, Play, Trash2, CheckCircle, Clock, XCircle, Eye, Copy, X, Terminal } from 'lucide-react';
+import { API_HOST, API_BASE } from '../utils/api';
 
 export default function VideosView({ onReviewAnalysis, onLaunchTraining }) {
     const [videos, setVideos] = useState([]);
@@ -13,7 +14,7 @@ export default function VideosView({ onReviewAnalysis, onLaunchTraining }) {
 
     const fetchVideos = async () => {
         try {
-            const res = await fetch('http://localhost:8000/api/videos/library');
+            const res = await fetch('${API_BASE}/videos/library');
             const data = await res.json();
             setVideos(data.videos || []);
         } catch (error) {
@@ -247,7 +248,7 @@ export default function VideosView({ onReviewAnalysis, onLaunchTraining }) {
                     <div key={video.task_name} className="video-card">
                         <div className="video-thumbnail">
                             <video
-                                src={video.video_url || `http://localhost:8000/data/${video.task_name}/video.mp4`}
+                                src={video.video_url || `${API_HOST}/data/${video.task_name}/video.mp4`}
                                 className="thumbnail-video"
                                 muted
                                 playsInline
@@ -301,7 +302,7 @@ export default function VideosView({ onReviewAnalysis, onLaunchTraining }) {
                                         className="btn-action btn-primary"
                                         onClick={async () => {
                                             try {
-                                                const res = await fetch(`http://localhost:8000/api/analyze/${video.task_name}`, {
+                                                const res = await fetch(`${API_BASE}/analyze/${video.task_name}`, {
                                                     method: 'POST'
                                                 });
                                                 if (res.ok) {

@@ -43,8 +43,20 @@ def evaluate(args):
         if args.video:
             video_path = args.video
         else:
-            # Guess path
-            video_path = f"data/{video_name}.mp4"
+            # Try common path patterns
+            task_name = config.get('task_name') or video_name.rsplit('_', 2)[0]
+            candidates = [
+                f"data/{task_name}/video.mp4",
+                f"data/{video_name}/video.mp4",
+                f"data/{video_name}.mp4"
+            ]
+            video_path = None
+            for candidate in candidates:
+                if os.path.exists(candidate):
+                    video_path = candidate
+                    break
+            if not video_path:
+                video_path = candidates[0]  # Default for error message
             
     print(f"Video Name: {video_name}")
     print(f"Video Path: {video_path}")
@@ -119,8 +131,8 @@ def evaluate(args):
         ep_result = {
             "episode": ep + 1,
             "reward": float(total_reward),
-            "success": info.get("success", False),
-            "lifted": info.get("lifted", False),
+            "success": bool(info.get("success", False)),
+            "lifted": bool(info.get("lifted", False)),
             "steps": step_count,
             "dist_to_target": float(info.get("dist_to_target", 0))
         }
@@ -144,15 +156,15 @@ def evaluate(args):
     # Save metrics if requested
     if args.save_metrics:
         results = {
-            "success_rate": sum(1 for r in episode_results if r["success"]) / len(episode_results),
-            "avg_reward": np.mean([r["reward"] for r in episode_results]),
-            "lift_rate": sum(1 for r in episode_results if r["lifted"]) / len(episode_results),
-            "avg_steps": np.mean([r["steps"] for r in episode_results]),
-            "avg_dist_to_target": np.mean([r["dist_to_target"] for r in episode_results]),
+            "success_rate": float(sum(1 for r in episode_results if r["success"]) / len(episode_results)),
+            "avg_reward": float(np.mean([r["reward"] for r in episode_results])),
+            "lift_rate": float(sum(1 for r in episode_results if r["lifted"]) / len(episode_results)),
+            "avg_steps": float(np.mean([r["steps"] for r in episode_results])),
+            "avg_dist_to_target": float(np.mean([r["dist_to_target"] for r in episode_results])),
             "episodes": episode_results,
             "milestone_progress": {
-                "lifted": any(r["lifted"] for r in episode_results),
-                "at_target": any(r["success"] for r in episode_results)
+                "lifted": bool(any(r["lifted"] for r in episode_results)),
+                "at_target": bool(any(r["success"] for r in episode_results))
             }
         }
         results_path = os.path.join(args.run_dir, "eval_results.json")

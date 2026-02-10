@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Database, Video, ChevronRight, ChevronDown, Folder, Globe, Upload, Loader2 } from 'lucide-react';
+import { API_BASE } from '../utils/api';
 
 const Sidebar = ({ runs, selectedRun, onSelectRun, loading, onRunsUpdated }) => {
     const [expandedGroups, setExpandedGroups] = useState({});
@@ -51,7 +52,7 @@ const Sidebar = ({ runs, selectedRun, onSelectRun, loading, onRunsUpdated }) => 
         formData.append('file', file);
 
         try {
-            const res = await fetch('http://localhost:8000/api/runs/upload', {
+            const res = await fetch(`${API_BASE}/runs/upload`, {
                 method: 'POST',
                 body: formData
             });

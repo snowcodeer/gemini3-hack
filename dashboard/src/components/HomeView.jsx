@@ -1,6 +1,7 @@
 
 import React, { useState, useCallback } from 'react';
 import { Upload, Video, FileVideo, Loader2 } from 'lucide-react';
+import { API_BASE } from '../utils/api';
 
 export default function HomeView({ onUploadSuccess }) {
   const [isDragging, setIsDragging] = useState(false);
@@ -52,7 +53,7 @@ export default function HomeView({ onUploadSuccess }) {
     formData.append('file', file);
 
     try {
-      const res = await fetch('http://localhost:8000/api/upload', {
+      const res = await fetch(`${API_BASE}/upload`, {
         method: 'POST',
         body: formData,
       });

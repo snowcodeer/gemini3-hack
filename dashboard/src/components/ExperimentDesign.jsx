@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, ArrowLeft, Bot, User, Code, FileText, Loader2, Copy, Check, Download, Cloud } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import { API_HOST, API_BASE } from '../utils/api';
 
 export default function ExperimentDesign({ taskName, onBack }) {
     const [messages, setMessages] = useState([]);
@@ -28,7 +29,7 @@ export default function ExperimentDesign({ taskName, onBack }) {
     useEffect(() => {
         const fetchVideoUrl = async () => {
             try {
-                const res = await fetch('http://localhost:8000/api/videos/library');
+                const res = await fetch('${API_BASE}/videos/library');
                 const data = await res.json();
                 const video = data.videos?.find(v => v.task_name === taskName);
                 if (video?.video_url) {
@@ -48,14 +49,14 @@ export default function ExperimentDesign({ taskName, onBack }) {
         const loadGeneratedScript = async () => {
             try {
                 // First, get the base training script
-                const scriptRes = await fetch(`http://localhost:8000/api/experiment/script/generate/${taskName}`);
+                const scriptRes = await fetch(`${API_BASE}/experiment/script/generate/${taskName}`);
                 const scriptData = await scriptRes.json();
 
                 // Then, get Gemini-generated reward function
                 let rewardCode = '';
                 let geminiGenerated = false;
                 try {
-                    const rewardRes = await fetch(`http://localhost:8000/api/experiment/generate-reward/${taskName}`, {
+                    const rewardRes = await fetch(`${API_BASE}/experiment/generate-reward/${taskName}`, {
                         method: 'POST'
                     });
                     const rewardData = await rewardRes.json();
@@ -238,7 +239,7 @@ Ask me anything about the reward design!${generatedNote}`
                 const residualCode = codeTabs.find(t => t.title === 'residual.py')?.code || '';
                 const rewardCode = codeTabs.find(t => t.title === 'reward.py')?.code || '';
 
-                const uploadRes = await fetch('http://localhost:8000/api/experiment/upload-training', {
+                const uploadRes = await fetch('${API_BASE}/experiment/upload-training', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -298,7 +299,7 @@ Or download the files below:`,
         setIsLoading(true);
 
         try {
-            const res = await fetch('http://localhost:8000/api/experiment/chat', {
+            const res = await fetch('${API_BASE}/experiment/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -323,7 +324,7 @@ Or download the files below:`,
     };
 
     const downloadNotebook = () => {
-        window.open(`http://localhost:8000/api/experiment/notebook/${taskName}`, '_blank');
+        window.open(`${API_BASE}/experiment/notebook/${taskName}`, '_blank');
         setMessages(prev => [...prev, {
             role: 'model',
             content: `Downloading **train_${taskName}.ipynb**...\n\nTo use:\n1. Upload to [Google Colab](https://colab.research.google.com)\n2. Run cells to install dependencies\n3. Edit the \`compute_reward()\` function\n4. Start training!`
@@ -331,7 +332,7 @@ Or download the files below:`,
     };
 
     const downloadPackage = () => {
-        window.open(`http://localhost:8000/api/experiment/package/${taskName}`, '_blank');
+        window.open(`${API_BASE}/experiment/package/${taskName}`, '_blank');
         setMessages(prev => [...prev, {
             role: 'model',
             content: `Downloading **${taskName}_training.zip**...\n\nContents:\n- \`train_${taskName}.py\` - Main training script\n- \`data/\` - Video and analysis\n- \`requirements.txt\` - Dependencies\n\nTo run:\n\`\`\`bash\npip install -r requirements.txt\npython train_${taskName}.py\n\`\`\``
@@ -375,7 +376,7 @@ Or download the files below:`,
                     <div className="video-card">
                         <video
                             ref={videoRef}
-                            src={videoUrl || `http://localhost:8000/data/${taskName}/labeled.mp4`}
+                            src={videoUrl || `${API_HOST}/data/${taskName}/labeled.mp4`}
                             controls
                             className="reference-video"
                         />
