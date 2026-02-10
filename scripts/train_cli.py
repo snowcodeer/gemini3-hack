@@ -41,6 +41,7 @@ def main():
     parser.add_argument("--backend", default="http://localhost:8000", help="Backend URL")
     parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs")
     parser.add_argument("--reward-config", help="Path to reward config JSON")
+    parser.add_argument("--reward-file", help="Path to custom reward Python script")
     
     args = parser.parse_args()
     
@@ -112,6 +113,9 @@ def main():
     
     if args.reward_config:
         training_cmd.extend(["--reward-config", args.reward_config])
+
+    if args.reward_file:
+         training_cmd.extend(["--reward-file", args.reward_file])
     
     try:
         result = subprocess.run(training_cmd, check=True)

@@ -11,6 +11,7 @@ import os
 import pickle
 import cv2
 import sys
+import json
 from pathlib import Path
 from stable_baselines3 import TD3
 
@@ -95,11 +96,13 @@ def evaluate(args):
     
     # Run Episodes
     frames = []
+    episode_results = []
     
     for ep in range(args.episodes):
         obs, info = env.reset()
         done = False
         total_reward = 0
+        step_count = 0
         
         # Initial Render
         frames.append(base_env.render())
@@ -108,11 +111,21 @@ def evaluate(args):
             action, _ = model.predict(obs, deterministic=True)
             obs, reward, terminated, truncated, info = env.step(action)
             total_reward += reward
+            step_count += 1
             done = terminated or truncated
             
             frames.append(base_env.render())
-            
-        print(f"Ep {ep+1}: Reward={total_reward:.1f}, Success={info.get('success', False)}, Lifted={info.get('lifted', False)}")
+        
+        ep_result = {
+            "episode": ep + 1,
+            "reward": float(total_reward),
+            "success": info.get("success", False),
+            "lifted": info.get("lifted", False),
+            "steps": step_count,
+            "dist_to_target": float(info.get("dist_to_target", 0))
+        }
+        episode_results.append(ep_result)
+        print(f"Ep {ep+1}: Reward={total_reward:.1f}, Success={ep_result['success']}, Lifted={ep_result['lifted']}")
         
     env.close()
     
@@ -127,6 +140,26 @@ def evaluate(args):
         out.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
     
     out.release()
+    
+    # Save metrics if requested
+    if args.save_metrics:
+        results = {
+            "success_rate": sum(1 for r in episode_results if r["success"]) / len(episode_results),
+            "avg_reward": np.mean([r["reward"] for r in episode_results]),
+            "lift_rate": sum(1 for r in episode_results if r["lifted"]) / len(episode_results),
+            "avg_steps": np.mean([r["steps"] for r in episode_results]),
+            "avg_dist_to_target": np.mean([r["dist_to_target"] for r in episode_results]),
+            "episodes": episode_results,
+            "milestone_progress": {
+                "lifted": any(r["lifted"] for r in episode_results),
+                "at_target": any(r["success"] for r in episode_results)
+            }
+        }
+        results_path = os.path.join(args.run_dir, "eval_results.json")
+        with open(results_path, "w") as f:
+            json.dump(results, f, indent=2)
+        print(f"Saved metrics to {results_path}")
+    
     print("Done!")
 
 if __name__ == "__main__":
@@ -134,6 +167,7 @@ if __name__ == "__main__":
     parser.add_argument("--run-dir", required=True, help="Path to run directory")
     parser.add_argument("--episodes", type=int, default=3)
     parser.add_argument("--video", type=str, help="Path to video (if not in config)")
+    parser.add_argument("--save-metrics", action="store_true", help="Save eval_results.json")
     
     args = parser.parse_args()
     evaluate(args)

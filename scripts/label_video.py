@@ -23,7 +23,10 @@ def label_video(video_path, analysis_path=None, output_path=None):
     if analysis_path and Path(analysis_path).exists():
         with open(analysis_path, 'r') as f:
             analysis = json.load(f)
-    
+        # Handle list format (unwrap if needed)
+        if isinstance(analysis, list) and len(analysis) > 0:
+            analysis = analysis[0]
+
     milestones = analysis.get("milestones", [])
     
     # Fallback for old schema
@@ -104,6 +107,29 @@ def label_video(video_path, analysis_path=None, output_path=None):
     with open(landmarks_path, 'wb') as f:
         pickle.dump(all_landmarks, f)
     print(f"Saved landmarks to {landmarks_path}")
+
+    # Re-encode to H.264 for browser compatibility
+    import subprocess
+    import shutil
+
+    if shutil.which("ffmpeg"):
+        temp_path = str(output_path) + ".temp.mp4"
+        shutil.move(str(output_path), temp_path)
+        try:
+            subprocess.run([
+                "ffmpeg", "-y", "-i", temp_path,
+                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                "-pix_fmt", "yuv420p",  # Required for browser compatibility
+                "-movflags", "+faststart",  # Enable streaming
+                str(output_path)
+            ], check=True, capture_output=True)
+            Path(temp_path).unlink()  # Remove temp file
+            print(f"Re-encoded to H.264 for browser playback")
+        except subprocess.CalledProcessError as e:
+            print(f"ffmpeg re-encode failed: {e.stderr.decode()}")
+            shutil.move(temp_path, str(output_path))  # Restore original
+    else:
+        print("Warning: ffmpeg not found, video may not play in browser")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

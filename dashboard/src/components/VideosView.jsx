@@ -50,7 +50,175 @@ export default function VideosView({ onReviewAnalysis, onLaunchTraining }) {
     if (loading) {
         return (
             <div className="videos-view">
-                <div className="loading-state">Loading videos...</div>
+                <div className="view-header">
+                    <div>
+                        <h1>Video Library</h1>
+                        <p className="subtitle">Manage your uploaded videos and analyses</p>
+                    </div>
+                    <div className="stats-summary">
+                        <div className="stat-item skeleton-stat">
+                            <div className="skeleton-pulse skeleton-number"></div>
+                            <span className="stat-label">Total Videos</span>
+                        </div>
+                        <div className="stat-item skeleton-stat">
+                            <div className="skeleton-pulse skeleton-number"></div>
+                            <span className="stat-label">Analyzed</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="videos-grid">
+                    {[1, 2, 3, 4, 5, 6].map((i) => (
+                        <div key={i} className="video-card skeleton-card">
+                            <div className="video-thumbnail skeleton-thumbnail">
+                                <div className="skeleton-pulse skeleton-video-bg"></div>
+                                <div className="skeleton-play-icon">
+                                    <Video size={48} strokeWidth={1.5} opacity={0.3} />
+                                </div>
+                            </div>
+                            <div className="video-info">
+                                <div className="skeleton-pulse skeleton-title"></div>
+                                <div className="skeleton-pulse skeleton-meta"></div>
+                                <div className="skeleton-pulse skeleton-badge"></div>
+                                <div className="skeleton-actions">
+                                    <div className="skeleton-pulse skeleton-button"></div>
+                                    <div className="skeleton-pulse skeleton-button"></div>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+
+                <style>{`
+                    .videos-view {
+                        padding: 32px;
+                        max-height: calc(100vh - 64px);
+                        overflow-y: auto;
+                    }
+                    .view-header {
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: flex-start;
+                        margin-bottom: 32px;
+                    }
+                    .view-header h1 {
+                        font-size: 2rem;
+                        font-weight: 800;
+                        margin: 0 0 8px 0;
+                    }
+                    .subtitle {
+                        color: var(--text-secondary);
+                        margin: 0;
+                    }
+                    .stats-summary {
+                        display: flex;
+                        gap: 24px;
+                    }
+                    .stat-item {
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        padding: 16px 24px;
+                        background: var(--bg-card);
+                        border: 1px solid var(--border-color);
+                        border-radius: 12px;
+                    }
+                    .videos-grid {
+                        display: grid;
+                        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+                        gap: 24px;
+                    }
+                    .video-card {
+                        background: var(--bg-card);
+                        border: 1px solid var(--border-color);
+                        border-radius: 16px;
+                        overflow: hidden;
+                    }
+                    .video-thumbnail {
+                        position: relative;
+                        width: 100%;
+                        height: 180px;
+                        background: #000;
+                        overflow: hidden;
+                    }
+                    .video-info {
+                        padding: 20px;
+                    }
+
+                    /* Skeleton Loading Styles */
+                    @keyframes shimmer {
+                        0% { background-position: -200% 0; }
+                        100% { background-position: 200% 0; }
+                    }
+                    .skeleton-pulse {
+                        background: linear-gradient(
+                            90deg,
+                            rgba(255,255,255,0.03) 0%,
+                            rgba(255,255,255,0.08) 50%,
+                            rgba(255,255,255,0.03) 100%
+                        );
+                        background-size: 200% 100%;
+                        animation: shimmer 1.5s infinite ease-in-out;
+                        border-radius: 6px;
+                    }
+                    .skeleton-card {
+                        pointer-events: none;
+                    }
+                    .skeleton-stat {
+                        min-width: 100px;
+                    }
+                    .skeleton-number {
+                        width: 48px;
+                        height: 36px;
+                        margin-bottom: 8px;
+                        border-radius: 8px;
+                    }
+                    .skeleton-thumbnail {
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                    }
+                    .skeleton-video-bg {
+                        position: absolute;
+                        inset: 0;
+                        background: linear-gradient(
+                            90deg,
+                            rgba(168,85,247,0.05) 0%,
+                            rgba(168,85,247,0.15) 50%,
+                            rgba(168,85,247,0.05) 100%
+                        );
+                        background-size: 200% 100%;
+                        animation: shimmer 1.5s infinite ease-in-out;
+                    }
+                    .skeleton-play-icon {
+                        position: relative;
+                        z-index: 1;
+                    }
+                    .skeleton-title {
+                        width: 70%;
+                        height: 22px;
+                        margin-bottom: 12px;
+                    }
+                    .skeleton-meta {
+                        width: 50%;
+                        height: 16px;
+                        margin-bottom: 16px;
+                    }
+                    .skeleton-badge {
+                        width: 90px;
+                        height: 24px;
+                        margin-bottom: 16px;
+                    }
+                    .skeleton-actions {
+                        display: flex;
+                        gap: 8px;
+                    }
+                    .skeleton-button {
+                        width: 120px;
+                        height: 36px;
+                        border-radius: 8px;
+                    }
+                `}</style>
             </div>
         );
     }
@@ -79,11 +247,18 @@ export default function VideosView({ onReviewAnalysis, onLaunchTraining }) {
                     <div key={video.task_name} className="video-card">
                         <div className="video-thumbnail">
                             <video
-                                src={`${video.video_url || `http://localhost:8000/data/${video.task_name}/video.mp4`}#t=0.1`}
+                                src={video.video_url || `http://localhost:8000/data/${video.task_name}/video.mp4`}
                                 className="thumbnail-video"
                                 muted
                                 playsInline
-                                preload="auto"
+                                preload="metadata"
+                                onLoadedData={(e) => {
+                                    e.target.currentTime = 0.5;
+                                }}
+                                onError={(e) => {
+                                    const videoEl = e.target;
+                                    console.error('Video load error:', video.task_name, 'src:', videoEl.src, 'error:', videoEl.error);
+                                }}
                             />
                             <div className="video-overlay">
                                 <Video size={48} strokeWidth={1.5} />

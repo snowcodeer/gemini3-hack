@@ -1,8 +1,11 @@
-import React, { useState } from 'react';
-import { Database, Video, ChevronRight, ChevronDown, Folder, Globe } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Database, Video, ChevronRight, ChevronDown, Folder, Globe, Upload, Loader2 } from 'lucide-react';
 
-const Sidebar = ({ runs, selectedRun, onSelectRun, loading }) => {
+const Sidebar = ({ runs, selectedRun, onSelectRun, loading, onRunsUpdated }) => {
     const [expandedGroups, setExpandedGroups] = useState({});
+    const [uploading, setUploading] = useState(false);
+    const [uploadError, setUploadError] = useState(null);
+    const fileInputRef = useRef(null);
 
     // Group runs by their 'group' property
     const groupedRuns = runs.reduce((acc, run) => {
@@ -28,6 +31,51 @@ const Sidebar = ({ runs, selectedRun, onSelectRun, loading }) => {
         }
     }, [selectedRun]);
 
+    const handleUploadClick = () => {
+        fileInputRef.current?.click();
+    };
+
+    const handleFileChange = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        if (!file.name.endsWith('.zip')) {
+            setUploadError('Please upload a .zip file');
+            return;
+        }
+
+        setUploading(true);
+        setUploadError(null);
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            const res = await fetch('http://localhost:8000/api/runs/upload', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Upload failed');
+            }
+
+            const data = await res.json();
+            console.log('Upload successful:', data);
+
+            // Refresh runs list
+            if (onRunsUpdated) onRunsUpdated();
+
+        } catch (err) {
+            console.error('Upload error:', err);
+            setUploadError(err.message);
+        } finally {
+            setUploading(false);
+            e.target.value = ''; // Reset input
+        }
+    };
+
     return (
         <aside className="sidebar">
             <div className="sidebar-header">
@@ -36,8 +84,41 @@ const Sidebar = ({ runs, selectedRun, onSelectRun, loading }) => {
                         <Database size={18} />
                         Experiments
                     </h1>
-                    <span className="badge-count">{runs.length}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <button
+                            onClick={handleUploadClick}
+                            disabled={uploading}
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                padding: '4px 8px',
+                                fontSize: '11px',
+                                background: 'rgba(59, 130, 246, 0.2)',
+                                border: '1px solid rgba(59, 130, 246, 0.3)',
+                                borderRadius: '4px',
+                                color: '#60a5fa',
+                                cursor: uploading ? 'wait' : 'pointer'
+                            }}
+                        >
+                            {uploading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+                            {uploading ? 'Uploading...' : 'Upload'}
+                        </button>
+                        <span className="badge-count">{runs.length}</span>
+                    </div>
                 </div>
+                {uploadError && (
+                    <div style={{ padding: '8px', fontSize: '11px', color: '#ef4444', background: 'rgba(239,68,68,0.1)', borderRadius: '4px', marginTop: '8px' }}>
+                        {uploadError}
+                    </div>
+                )}
+                <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".zip"
+                    onChange={handleFileChange}
+                    style={{ display: 'none' }}
+                />
             </div>
 
             <div className="run-list">
@@ -104,6 +185,15 @@ const Sidebar = ({ runs, selectedRun, onSelectRun, loading }) => {
                 .group-header:hover { background: rgba(255,255,255,0.05) !important; }
                 .sc-badge { font-size: 9px; background: var(--accent-blue); padding: 1px 3px; border-radius: 2px; margin-left: 6px; color: white; }
                 .group-content { border-left: 1px solid rgba(255,255,255,0.05); margin-left: 10px; }
+
+                /* Spin Animation */
+                @keyframes spin {
+                    from { transform: rotate(0deg); }
+                    to { transform: rotate(360deg); }
+                }
+                .animate-spin {
+                    animation: spin 1s linear infinite;
+                }
             `}</style>
         </aside>
     );

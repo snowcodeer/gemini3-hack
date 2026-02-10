@@ -586,18 +586,27 @@ def train(args):
     import pickle
     import shutil
 
-    video_name = Path(args.video).stem
+    # Get task name from video path (e.g., data/pick-3/video.mp4 -> pick-3)
+    video_path = Path(args.video)
+    if video_path.parent.name != "data" and video_path.parent.parent.name == "data":
+        # Structure: data/{task_name}/video.mp4
+        task_name = video_path.parent.name
+    else:
+        # Fallback to video stem
+        task_name = video_path.stem
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    code_version = f"v_{timestamp}"
 
     model_to_load = None
     if args.resume:
         source_dir = args.resume
         if not os.path.isdir(source_dir):
             raise FileNotFoundError(f"Resume directory {source_dir} not found.")
-        
-        # Create NEW run dir for branching
-        run_name = f"{video_name}_{timestamp}_resumed"
-        run_dir = os.path.join(args.output_dir, run_name)
+
+        # Create NEW run dir for branching - use task_name as group
+        run_name = f"{task_name}_{timestamp}_resumed"
+        run_dir = os.path.join("runs", task_name, run_name)
         os.makedirs(run_dir, exist_ok=True)
         print(f"Resuming from {source_dir} -> Branched into {run_dir}")
         
@@ -668,12 +677,14 @@ def train(args):
                 model_path = None
         model_to_load = model_path
     else:
-        run_name = f"{video_name}_{timestamp}"
-        run_dir = os.path.join(args.output_dir, run_name)
+        # Use task_name as group folder
+        run_name = f"{task_name}_{timestamp}"
+        run_dir = os.path.join("runs", task_name, run_name)
         os.makedirs(run_dir, exist_ok=True)
 
-        print(f"Training Residual RL for {video_name}")
+        print(f"Training Residual RL for {task_name}")
         print(f"Directory: {run_dir}")
+        print(f"Code Version: {code_version}")
 
         
         # Configure from Video
@@ -710,15 +721,30 @@ def train(args):
             'residual_scale': args.residual_scale,
             'task_type': task_type,
             'reward_config': reward_config,
-            'reward_version': args.reward_version
+            'reward_version': args.reward_version,
+            'code_version': code_version,
+            'task_name': task_name,
+            'timestamp': timestamp
         }
         with open(os.path.join(run_dir, "config.pkl"), "wb") as f:
             pickle.dump(config, f)
-            
+
         # Snapshot reward code for experiment tracking
         reward_snippet = get_reward_code_snapshot(__file__)
         with open(os.path.join(run_dir, "reward_code.py"), "w") as f:
             f.write(reward_snippet)
+
+        # Upload code version to S3
+        if storage.enabled:
+            code_s3_path = f"code_versions/{task_name}/{code_version}"
+            try:
+                # Upload reward code snapshot
+                storage.upload_file(os.path.join(run_dir, "reward_code.py"), f"{code_s3_path}/reward_code.py")
+                # Upload full training script
+                storage.upload_file(__file__, f"{code_s3_path}/train_grasp_residual.py")
+                print(f"Uploaded code version to S3: {code_s3_path}")
+            except Exception as e:
+                print(f"Failed to upload code version: {e}")
 
     # Load custom reward function if file provided
     custom_reward_fn = None
@@ -791,7 +817,7 @@ def train(args):
 
     plot_cb = PlotCallback(
         plot_dir=os.path.join(run_dir, "plots"),
-        video_name=video_name,
+        video_name=task_name,
         task_type=task_type,
         plot_freq=2000
     )
@@ -808,7 +834,9 @@ def train(args):
     model.save(os.path.join(run_dir, "td3_final"))
     if storage.enabled:
         print("Final sync to cloud...")
-        storage.upload_dir(run_dir, f"runs/{run_dir.split('/')[-1] if '/' in run_dir else Path(run_dir).parent.name}/{Path(run_dir).name}")
+        # run_dir is like "runs/pick-3/pick-3_20240109_120000", use same structure in cloud
+        cloud_path = str(Path(run_dir)).replace("\\", "/")  # Normalize for Windows
+        storage.upload_dir(run_dir, cloud_path)
     print("Training Complete!")
     env.close()
 
@@ -816,7 +844,6 @@ def train(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--video", required=True, help="Path to demo video")
-    parser.add_argument("--output-dir", default="runs/residual_pick3")
     parser.add_argument("--timesteps", type=int, default=50000)
     parser.add_argument("--residual-scale", type=float, default=0.3)
     parser.add_argument("--max-steps", type=int, default=100)

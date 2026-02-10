@@ -530,6 +530,15 @@ export default function AnalysisReview({ videoPath, onConfirm, onCancel }) {
                 .field label { display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 8px; }
                 .field input { width: 100%; padding: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; color: white; }
                 .explanation { margin-top: 12px; display: flex; gap: 8px; padding: 8px; background: rgba(251, 191, 36, 0.1); border-radius: 8px; color: #fbbf24; font-size: 0.75rem; }
+
+                /* Spin Animation */
+                @keyframes spin {
+                    from { transform: rotate(0deg); }
+                    to { transform: rotate(360deg); }
+                }
+                .animate-spin {
+                    animation: spin 1s linear infinite;
+                }
             `}</style>
         </div >
     );

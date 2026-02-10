@@ -3,7 +3,9 @@ import boto3
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load .env from project root
+project_root = Path(__file__).resolve().parent.parent.parent
+load_dotenv(project_root / ".env")
 
 class BlobStorage:
     def __init__(self):
@@ -13,14 +15,18 @@ class BlobStorage:
         self.secret_key = os.getenv("BLOB_SECRET_KEY")
         
         if all([self.bucket_name, self.access_key, self.secret_key]):
+            from botocore.config import Config
+            self.region = "eu-west-2"  # Hardcoded - bucket is in eu-west-2
             self.s3 = boto3.client(
                 's3',
                 endpoint_url=self.endpoint_url,
                 aws_access_key_id=self.access_key,
-                aws_secret_access_key=self.secret_key
+                aws_secret_access_key=self.secret_key,
+                config=Config(signature_version='s3v4', s3={'addressing_style': 'virtual'}),
+                region_name=self.region
             )
             self.enabled = True
-            print(f"Cloud Storage initialized: {self.bucket_name}")
+            print(f"Cloud Storage initialized: {self.bucket_name} (region: {self.region})")
         else:
             self.s3 = None
             self.enabled = False

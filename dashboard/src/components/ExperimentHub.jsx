@@ -52,6 +52,7 @@ export default function ExperimentHub({ sessionId }) {
                 onSelectRun={setSelectedRun}
                 loading={loading}
                 sessionId={sessionId}
+                onRunsUpdated={loadRuns}
             />
             <main className="hub-content" style={{ flex: 1, overflow: 'auto', background: 'var(--bg-primary)' }}>
                 {selectedRun ? (
