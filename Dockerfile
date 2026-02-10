@@ -1,4 +1,5 @@
 # Server build with video analysis (no RL/training deps)
+# Updated: force rebuild
 FROM python:3.11-slim
 
 # System deps for video processing
