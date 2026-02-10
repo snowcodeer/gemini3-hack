@@ -1,0 +1,12 @@
+# Ignore Python/backend files
+*.py
+requirements*.txt
+backend/
+scripts/
+vidreward/
+*.pkl
+*.zip
+runs/
+data/
+Dockerfile
+render.yaml
