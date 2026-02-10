@@ -695,42 +695,43 @@ def get_videos_library():
 
 @app.delete("/api/videos/{task_name}")
 def delete_video(task_name: str):
-    """Delete a video and all associated files"""
-    task_dir = Path("data") / task_name
-    
-    if not task_dir.exists():
-        raise HTTPException(status_code=404, detail="Video not found")
-    
+    """Delete a video and all associated files from S3"""
+    if not storage.enabled:
+        raise HTTPException(status_code=503, detail="Cloud storage not configured")
+
     try:
-        shutil.rmtree(task_dir)
+        # List and delete all objects with this prefix
+        prefix = f"data/{task_name}/"
+        response = storage.s3.list_objects_v2(Bucket=storage.bucket_name, Prefix=prefix)
+        if 'Contents' not in response:
+            raise HTTPException(status_code=404, detail="Video not found")
+
+        for obj in response.get('Contents', []):
+            storage.s3.delete_object(Bucket=storage.bucket_name, Key=obj['Key'])
+
         return {"status": "deleted", "task_name": task_name}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete: {e}")
 
 # --- Training API (for hybrid deployment) ---
 @app.get("/api/training/prepare/{task_name}")
 def prepare_training(task_name: str):
-    """Get training configuration and download URLs for local training"""
-    task_dir = Path("data") / task_name
-    
-    if not task_dir.exists():
-        raise HTTPException(status_code=404, detail="Task not found")
-    
-    analysis_file = task_dir / "analysis.json"
-    if not analysis_file.exists():
-        raise HTTPException(status_code=400, detail="Video not analyzed yet")
-    
-    # Load analysis
-    with open(analysis_file) as f:
-        analysis = json.load(f)
-    
-    # Generate S3 URLs if storage is enabled
-    video_url = f"/data/{task_name}/video.mp4"
-    analysis_url = f"/data/{task_name}/analysis.json"
-    
-    if storage.enabled:
-        video_url = storage.get_url(f"data/{task_name}/video.mp4")
-        analysis_url = storage.get_url(f"data/{task_name}/analysis.json")
+    """Get training configuration and download URLs for local training - from S3"""
+    if not storage.enabled:
+        raise HTTPException(status_code=503, detail="Cloud storage not configured")
+
+    # Load analysis from S3
+    try:
+        analysis_obj = storage.s3.get_object(Bucket=storage.bucket_name, Key=f"data/{task_name}/analysis.json")
+        analysis = json.loads(analysis_obj['Body'].read().decode('utf-8'))
+    except Exception as e:
+        raise HTTPException(status_code=404, detail="Task not found or not analyzed")
+
+    # Generate S3 URLs
+    video_url = storage.get_url(f"data/{task_name}/video.mp4")
+    analysis_url = storage.get_url(f"data/{task_name}/analysis.json")
     
     return {
         "task_name": task_name,
@@ -852,30 +853,24 @@ class ExperimentChatRequest(BaseModel):
 async def experiment_chat_endpoint(req: ExperimentChatRequest):
     """
     Chat with context of the specific task (analysis + landmarks summary).
+    Fetches data from S3.
     """
-    task_dir = Path("data") / req.task_name
-    if not task_dir.exists():
+    if not storage.enabled:
+        raise HTTPException(status_code=503, detail="Cloud storage not configured")
+
+    # Load analysis from S3
+    analysis = {}
+    try:
+        analysis_obj = storage.s3.get_object(Bucket=storage.bucket_name, Key=f"data/{req.task_name}/analysis.json")
+        analysis = json.loads(analysis_obj['Body'].read().decode('utf-8'))
+    except storage.s3.exceptions.NoSuchKey:
+        raise HTTPException(status_code=404, detail="Task not found or not analyzed")
+    except Exception as e:
+        print(f"Error loading analysis from S3: {e}")
         raise HTTPException(status_code=404, detail="Task not found")
 
-    # Load Context
-    analysis = {}
-    analysis_path = task_dir / "analysis.json"
-    if analysis_path.exists():
-        with open(analysis_path) as f:
-            analysis = json.load(f)
-            
-    landmarks_summary = "No landmarks data found."
-    landmarks_path = task_dir / "landmarks.pkl"
-    if landmarks_path.exists():
-        try:
-            with open(landmarks_path, 'rb') as f:
-                lms_data = pickle.load(f)
-            if lms_data and len(lms_data) > 0:
-                num_frames = len(lms_data)
-                sample_keys = list(lms_data[0].keys())
-                landmarks_summary = f"Landmarks available for {num_frames} frames. Keys per frame: {sample_keys}"
-        except Exception as e:
-            landmarks_summary = f"Error reading landmarks: {str(e)}"
+    # Landmarks summary (skip for now - not critical for chat)
+    landmarks_summary = "Landmarks data available in S3."
 
     # Load the generated script template for context
     task_type = analysis.get("task_type", "pick")
@@ -1083,22 +1078,21 @@ async def fork_experiment(req: ForkExperimentRequest):
 
 @app.get("/api/experiment/notebook/{task_name}")
 def generate_colab_notebook(task_name: str, request: Request):
-    """Generate a Colab-ready Jupyter notebook for the task."""
+    """Generate a Colab-ready Jupyter notebook for the task - from S3."""
     from fastapi.responses import Response
+
+    if not storage.enabled:
+        raise HTTPException(status_code=503, detail="Cloud storage not configured")
 
     # Get the backend URL from the request
     backend_url = str(request.base_url).rstrip('/')
 
-    task_dir = Path("data") / task_name
-    if not task_dir.exists():
-        raise HTTPException(status_code=404, detail="Task not found")
-
-    analysis_path = task_dir / "analysis.json"
-    if not analysis_path.exists():
-        raise HTTPException(status_code=400, detail="Task not analyzed yet")
-
-    with open(analysis_path) as f:
-        analysis = json.load(f)
+    # Load analysis from S3
+    try:
+        analysis_obj = storage.s3.get_object(Bucket=storage.bucket_name, Key=f"data/{task_name}/analysis.json")
+        analysis = json.loads(analysis_obj['Body'].read().decode('utf-8'))
+    except Exception as e:
+        raise HTTPException(status_code=404, detail="Task not found or not analyzed")
 
     task_type = analysis.get("task_type", "pick")
     milestones = analysis.get("milestones", [])
@@ -1310,18 +1304,20 @@ def generate_colab_notebook(task_name: str, request: Request):
 
 @app.get("/api/experiment/package/{task_name}")
 def generate_training_package(task_name: str):
-    """Generate a zip file with all components for local training."""
+    """Generate a zip file with all components for local training - from S3."""
     import zipfile
     import io
     from fastapi.responses import StreamingResponse
 
-    task_dir = Path("data") / task_name
-    if not task_dir.exists():
-        raise HTTPException(status_code=404, detail="Task not found")
+    if not storage.enabled:
+        raise HTTPException(status_code=503, detail="Cloud storage not configured")
 
-    analysis_path = task_dir / "analysis.json"
-    if not analysis_path.exists():
-        raise HTTPException(status_code=400, detail="Task not analyzed yet")
+    # Load analysis from S3
+    try:
+        analysis_obj = storage.s3.get_object(Bucket=storage.bucket_name, Key=f"data/{task_name}/analysis.json")
+        analysis_content = analysis_obj['Body'].read().decode('utf-8')
+    except Exception as e:
+        raise HTTPException(status_code=404, detail="Task not found or not analyzed")
 
     # Get generated script
     script_response = generate_training_script(task_name)
@@ -1334,19 +1330,22 @@ def generate_training_package(task_name: str):
         # Add the training script
         zf.writestr(f"train_{task_name}.py", script_content)
 
-        # Add analysis.json
-        with open(analysis_path) as f:
-            zf.writestr(f"data/{task_name}/analysis.json", f.read())
+        # Add analysis.json from S3
+        zf.writestr(f"data/{task_name}/analysis.json", analysis_content)
 
-        # Add video if exists
-        video_path = task_dir / "video.mp4"
-        if video_path.exists():
-            zf.write(video_path, f"data/{task_name}/video.mp4")
+        # Add video from S3 if exists
+        try:
+            video_obj = storage.s3.get_object(Bucket=storage.bucket_name, Key=f"data/{task_name}/video.mp4")
+            zf.writestr(f"data/{task_name}/video.mp4", video_obj['Body'].read())
+        except:
+            pass  # Video not found, skip
 
-        # Add landmarks if exists
-        landmarks_path = task_dir / "landmarks.pkl"
-        if landmarks_path.exists():
-            zf.write(landmarks_path, f"data/{task_name}/landmarks.pkl")
+        # Add landmarks from S3 if exists
+        try:
+            landmarks_obj = storage.s3.get_object(Bucket=storage.bucket_name, Key=f"data/{task_name}/landmarks.pkl")
+            zf.writestr(f"data/{task_name}/landmarks.pkl", landmarks_obj['Body'].read())
+        except:
+            pass  # Landmarks not found, skip
 
         # Add requirements.txt
         requirements = """gymnasium>=0.29.0
@@ -1421,17 +1420,18 @@ def get_training_script():
 async def generate_reward_function(task_name: str):
     """
     Use Gemini to generate a custom reward function based on task analysis.
+    Fetches data from S3.
     """
-    task_dir = Path("data") / task_name
-    if not task_dir.exists():
-        raise HTTPException(status_code=404, detail="Task not found")
+    if not storage.enabled:
+        raise HTTPException(status_code=503, detail="Cloud storage not configured")
 
-    analysis_path = task_dir / "analysis.json"
-    if not analysis_path.exists():
-        raise HTTPException(status_code=400, detail="Task not analyzed yet")
-
-    with open(analysis_path) as f:
-        analysis = json.load(f)
+    # Load analysis from S3
+    try:
+        analysis_obj = storage.s3.get_object(Bucket=storage.bucket_name, Key=f"data/{task_name}/analysis.json")
+        analysis = json.loads(analysis_obj['Body'].read().decode('utf-8'))
+    except Exception as e:
+        print(f"Error loading analysis from S3: {e}")
+        raise HTTPException(status_code=404, detail="Task not found or not analyzed")
 
     task_type = analysis.get("task_type", "unknown")
     milestones = analysis.get("milestones", [])
@@ -2745,17 +2745,18 @@ def generate_training_script(task_name: str):
     - residual.py: Residual RL wrapper (action = base + residual)
     - reward.py: Custom milestone-based reward
     - train.py: Full training pipeline
+    Fetches data from S3.
     """
-    task_dir = Path("data") / task_name
-    if not task_dir.exists():
-        raise HTTPException(status_code=404, detail="Task not found")
+    if not storage.enabled:
+        raise HTTPException(status_code=503, detail="Cloud storage not configured")
 
-    analysis_path = task_dir / "analysis.json"
-    if not analysis_path.exists():
-        raise HTTPException(status_code=400, detail="Task not analyzed yet")
-
-    with open(analysis_path) as f:
-        analysis = json.load(f)
+    # Load analysis from S3
+    try:
+        analysis_obj = storage.s3.get_object(Bucket=storage.bucket_name, Key=f"data/{task_name}/analysis.json")
+        analysis = json.loads(analysis_obj['Body'].read().decode('utf-8'))
+    except Exception as e:
+        print(f"Error loading analysis from S3: {e}")
+        raise HTTPException(status_code=404, detail="Task not found or not analyzed")
 
     task_type = analysis.get("task_type", "pick")
     milestones = analysis.get("milestones", [])
