@@ -70,11 +70,15 @@ const MainView = ({ run }) => {
             try {
                 const evalRes = await fetch(`${API_BASE}/run/${run.group}/${run.id}/eval/results`);
                 const evalData = await evalRes.json();
+                // Set results if they exist
                 if (evalData.results) {
                     setEvalResults(evalData.results);
-                    setEvalVideos(evalData.videos || []);
+                }
+                // Always set videos if they exist (even without results)
+                if (evalData.videos?.length > 0) {
+                    setEvalVideos(evalData.videos);
                     setEvalVideoUrls(evalData.video_urls || {});
-                    if (evalData.videos?.length > 0) setSelectedEvalVideo(evalData.videos[0]);
+                    setSelectedEvalVideo(evalData.videos[0]);
                 }
             } catch (e) {
                 console.error('Failed to load eval results:', e);
