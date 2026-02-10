@@ -598,23 +598,41 @@ def run_evaluation(group: str, run_id: str, req: EvalRequest):
 
 @app.get("/api/run/{group}/{run_id}/eval/results")
 def get_eval_results(group: str, run_id: str):
-    """Get evaluation results for a run."""
-    run_path = RUNS_DIR / group / run_id
-    if not run_path.exists():
-        raise HTTPException(status_code=404, detail="Run not found")
-    
-    results_path = run_path / "eval_results.json"
-    eval_videos = list(run_path.glob("eval_*.mp4"))
-    
+    """Get evaluation results for a run - always from S3."""
+    clean_group = group.replace(" (Cloud)", "")
+
+    if not storage.enabled:
+        raise HTTPException(status_code=503, detail="Cloud storage not configured")
+
+    prefix = f"runs/{clean_group}/{run_id}/"
     results = None
-    if results_path.exists():
-        with open(results_path) as f:
-            results = json.load(f)
-    
+    videos = []
+    video_urls = {}
+
+    try:
+        # Get eval_results.json from S3
+        try:
+            results_obj = storage.s3.get_object(Bucket=storage.bucket_name, Key=f"{prefix}eval_results.json")
+            results = json.loads(results_obj['Body'].read().decode('utf-8'))
+        except:
+            pass
+
+        # List eval videos from S3
+        response = storage.s3.list_objects_v2(Bucket=storage.bucket_name, Prefix=prefix)
+        for obj in response.get('Contents', []):
+            key = obj['Key']
+            filename = key.split('/')[-1]
+            if filename.startswith('eval_') and filename.endswith('.mp4'):
+                videos.append(filename)
+                video_urls[filename] = storage.get_url(key)
+    except Exception as e:
+        print(f"Error fetching eval results from S3: {e}")
+
     return {
         "status": "completed" if results else "not_run",
         "results": results,
-        "videos": [v.name for v in eval_videos]
+        "videos": videos,
+        "video_urls": video_urls
     }
 
 

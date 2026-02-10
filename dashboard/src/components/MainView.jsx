@@ -13,6 +13,7 @@ const MainView = ({ run }) => {
     // Eval state
     const [evalResults, setEvalResults] = useState(null);
     const [evalVideos, setEvalVideos] = useState([]);
+    const [evalVideoUrls, setEvalVideoUrls] = useState({});
     const [evalRunning, setEvalRunning] = useState(false);
     const [selectedEvalVideo, setSelectedEvalVideo] = useState(null);
 
@@ -63,6 +64,20 @@ const MainView = ({ run }) => {
                 } catch (e) {
                     console.error('Failed to load code files:', e);
                 }
+            }
+
+            // Fetch eval results if available
+            try {
+                const evalRes = await fetch(`${API_BASE}/run/${run.group}/${run.id}/eval/results`);
+                const evalData = await evalRes.json();
+                if (evalData.results) {
+                    setEvalResults(evalData.results);
+                    setEvalVideos(evalData.videos || []);
+                    setEvalVideoUrls(evalData.video_urls || {});
+                    if (evalData.videos?.length > 0) setSelectedEvalVideo(evalData.videos[0]);
+                }
+            } catch (e) {
+                console.error('Failed to load eval results:', e);
             }
 
             // Initialize chat with experiment context
@@ -385,6 +400,7 @@ Ask me anything about this experiment, or request changes like:
                                                             clearInterval(poll);
                                                             setEvalResults(data.results);
                                                             setEvalVideos(data.videos || []);
+                                                            setEvalVideoUrls(data.video_urls || {});
                                                             if (data.videos?.length > 0) setSelectedEvalVideo(data.videos[0]);
                                                             setEvalRunning(false);
                                                         }
@@ -450,7 +466,7 @@ Ask me anything about this experiment, or request changes like:
                                             </div>
                                             <div className="video-player">
                                                 <video key={selectedEvalVideo} controls autoPlay muted loop>
-                                                    <source src={files.video_urls?.[selectedEvalVideo] || `${API_HOST}/runs/${run.group.replace(' (Cloud)', '')}/${run.id}/${selectedEvalVideo}`} type="video/mp4" />
+                                                    <source src={evalVideoUrls[selectedEvalVideo] || files.video_urls?.[selectedEvalVideo]} type="video/mp4" />
                                                 </video>
                                             </div>
                                         </div>
